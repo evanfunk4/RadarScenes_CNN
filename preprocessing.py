@@ -303,7 +303,7 @@ def preprocess_all_sequences(
    return npz_paths
 
 if __name__ == "__main__":
-    RADARSCENES_ROOT = "."
+    RADARSCENES_ROOT = "./RadarScenes"
 
     WORK_DIR = "./experiments"
     os.makedirs(WORK_DIR, exist_ok=True)
