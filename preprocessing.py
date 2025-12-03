@@ -15,9 +15,6 @@ from config import BEVConfig
 
 # ------------- BEV helpers -------------
 
-
-
-
 def compute_bev_shape(cfg: BEVConfig) -> Tuple[int, int]:
    """
    Return (H, W) for BEV grid.
@@ -304,3 +301,32 @@ def preprocess_all_sequences(
 
 
    return npz_paths
+
+if __name__ == "__main__":
+    RADARSCENES_ROOT = "."
+
+    WORK_DIR = "./experiments"
+    os.makedirs(WORK_DIR, exist_ok=True)
+
+    # Use the same BEVConfig as in train.py
+    bev_cfg = BEVConfig(
+        x_min=-20.0,
+        x_max=80.0,
+        y_min=-40.0,
+        y_max=40.0,
+        resolution=0.25,
+        history=3,
+        future=0,
+        max_tslh_s=1.0,
+        min_points_per_cell=1,
+        num_classes=12,
+        # plus any other flags (use_counts, use_log_counts, etc.) your BEVConfig has
+    )
+
+    out_dir = os.path.join(WORK_DIR, "preprocessed")
+    npz_paths = preprocess_all_sequences(
+        dataset_root=RADARSCENES_ROOT,
+        out_dir=out_dir,
+        cfg=bev_cfg,
+    )
+    print(f"Done. Wrote {len(npz_paths)} NPZ files into {out_dir}")
