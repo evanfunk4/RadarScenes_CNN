@@ -274,8 +274,7 @@ def train_model(cfg: TrainConfig) -> None:
 
 if __name__ == "__main__":
 
-
-   RADARSCENES_ROOT = "."
+   RADARSCENES_ROOT = "./RadarScenes"
    WORK_DIR = "./experiments"
 
 
