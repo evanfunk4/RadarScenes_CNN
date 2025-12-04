@@ -42,14 +42,14 @@ class TrainConfig:
 
 
    batch_size: int = 8
-   num_workers: int = 12
-   num_epochs: int = 20
+   num_workers: int = 0
+   num_epochs: int = 30
    learning_rate: float = 1e-3
    weight_decay: float = 1e-4
 
 
    pin_memory = False
-   persistent_workers = True
+   persistent_workers = False
 
 
    def _detect_device() -> str: # deprecated
