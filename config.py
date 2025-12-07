@@ -32,6 +32,8 @@ class BEVConfig:
    min_points_per_cell: int = 1
    num_classes: int = 12  # RadarScenes label_id range 0..11
 
+   # Added for debugging preprocessing memory issues
+   max_scenes_per_sequence_for_preprocessing: Optional[int] = None
 
 
 @dataclass
