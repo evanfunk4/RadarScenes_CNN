@@ -2,7 +2,7 @@ import os
 import json
 import math
 from typing import List, Tuple, Optional
-
+import time # Import time module for profiling
 
 import numpy as np
 from radar_scenes.sequence import Sequence
@@ -28,7 +28,6 @@ def compute_bev_shape(cfg: BEVConfig) -> Tuple[int, int]:
 
 
 
-
 def num_bev_channels(cfg: BEVConfig) -> int:
    c = 0
    if cfg.use_counts:
@@ -42,7 +41,6 @@ def num_bev_channels(cfg: BEVConfig) -> int:
    if cfg.use_tslh:
        c += 1
    return c
-
 
 
 
@@ -71,7 +69,6 @@ def pointcloud_to_indices(
    H, W = compute_bev_shape(cfg)
    valid = (ix >= 0) & (ix < W) & (iy >= 0) & (iy < H)
    return ix, iy, valid
-
 
 
 
@@ -179,7 +176,6 @@ def build_bev_and_labels_for_scene(
 
 
 
-
 def preprocess_sequence(
    scenes_json_path: str,
    cfg: BEVConfig,
@@ -200,12 +196,15 @@ def preprocess_sequence(
    Returns:
        path to npz file
    """
-
-
+   start_time_sequence = time.time()
    os.makedirs(out_dir, exist_ok=True)
 
 
+   seq_load_start = time.time()
    seq = Sequence.from_json(scenes_json_path)
+   seq_load_end = time.time()
+   print(f"  [preprocess_sequence] Time to load sequence {os.path.basename(scenes_json_path)}: {seq_load_end - seq_load_start:.4f} seconds")
+
    seq_name = os.path.basename(os.path.dirname(scenes_json_path))
 
 
@@ -218,28 +217,49 @@ def preprocess_sequence(
    tslh_grid = None
    prev_ts: Optional[float] = None
 
+   scene_processing_times = []
+   try:
+       for idx, scene in enumerate(seq.scenes()):
+           # Check for preprocessing scene limit from BEVConfig
+           if hasattr(cfg, 'max_scenes_per_sequence_for_preprocessing') and cfg.max_scenes_per_sequence_for_preprocessing is not None and idx >= cfg.max_scenes_per_sequence_for_preprocessing:
+               print(f"    [preprocess_sequence] Limiting sequence {seq_name} to {cfg.max_scenes_per_sequence_for_preprocessing} scenes.")
+               break
 
-   for idx, scene in enumerate(seq.scenes()):
-       ts = float(scene.timestamp) * 1e-6  # microseconds → seconds
-       dt = 0.0 if prev_ts is None else max(0.0, ts - prev_ts)
-       prev_ts = ts
-
-
-       bev, lbl, tslh_grid = build_bev_and_labels_for_scene(
-           scene, cfg, tslh_grid, dt
-       )
-
-
-       bevs.append(bev)
-       labels_list.append(lbl)
-       timestamps.append(ts)
-       scene_ids.append(idx)
+           print(f"    [preprocess_sequence] Processing scene {idx+1} of sequence {seq_name}...")
+           scene_start_time = time.time()
+           ts = float(scene.timestamp) * 1e-6  # microseconds \u2192 seconds
+           dt = 0.0 if prev_ts is None else max(0.0, ts - prev_ts)
+           prev_ts = ts
 
 
+           bev, lbl, tslh_grid = build_bev_and_labels_for_scene(
+               scene, cfg, tslh_grid, dt
+           )
+
+
+           bevs.append(bev)
+           labels_list.append(lbl)
+           timestamps.append(ts)
+           scene_ids.append(idx)
+           scene_processing_times.append(time.time() - scene_start_time)
+           print(f"    [preprocess_sequence] Finished scene {idx+1} in {scene_processing_times[-1]:.4f} seconds.")
+
+   except Exception as e:
+       print(f"[ERROR] An error occurred during scene processing for sequence {seq_name}: {e}")
+       # Re-raise to ensure the main script knows it failed
+       raise
+
+   if scene_processing_times:
+       print(f"  [preprocess_sequence] Avg time per scene: {np.mean(scene_processing_times):.4f} seconds (Total {len(scene_processing_times)} scenes)")
+       print(f"  [preprocess_sequence] Max time per scene: {np.max(scene_processing_times):.4f} seconds")
+
+   stack_start_time = time.time()
    bevs_arr = np.stack(bevs, axis=0)         # (T, H, W, C)
    labels_arr = np.stack(labels_list, axis=0)  # (T, H, W)
+   stack_end_time = time.time()
+   print(f"  [preprocess_sequence] Time to stack arrays: {stack_end_time - stack_start_time:.4f} seconds")
 
-
+   save_start_time = time.time()
    out_path = os.path.join(out_dir, f"{seq_name}_bev_seg.npz")
    np.savez_compressed(
        out_path,
@@ -249,9 +269,12 @@ def preprocess_sequence(
        scene_ids=np.array(scene_ids, dtype=np.int32),
        cfg=json.dumps(cfg.__dict__),
    )
+   save_end_time = time.time()
+   print(f"  [preprocess_sequence] Time to save {out_path}: {save_end_time - save_start_time:.4f} seconds")
    print(f"Saved preprocessed sequence {seq_name} to {out_path}")
-   return out_path
 
+   print(f"[preprocess_sequence] Total time for sequence {seq_name}: {time.time() - start_time_sequence:.4f} seconds")
+   return out_path
 
 
 
@@ -270,7 +293,8 @@ def preprocess_all_sequences(
    Returns:
        list of npz paths
    """
-   data_root = os.path.join(dataset_root, "data")
+   start_time_all_sequences = time.time()
+   data_root = os.path.join(dataset_root, "RadarScenes", "data") # Corrected path to data directory
    os.makedirs(out_dir, exist_ok=True)
 
 
@@ -283,27 +307,34 @@ def preprocess_all_sequences(
    npz_paths: List[str] = []
 
 
-   for seq_dir in seq_dirs:
+   # Process all sequences found (removed debugging limit here)
+   for i, seq_dir in enumerate(seq_dirs):
+       print(f"[preprocess_all_sequences] Processing sequence {i+1}/{len(seq_dirs)}: {seq_dir}")
        scenes_json = os.path.join(data_root, seq_dir, "scenes.json")
        if not os.path.isfile(scenes_json):
+           print(f"[preprocess_all_sequences] Skipping {seq_dir}, scenes.json not found.")
            continue
 
 
        out_path = os.path.join(out_dir, f"{seq_dir}_bev_seg.npz")
        if os.path.isfile(out_path):
-           print(f"[preprocess] Skipping {seq_dir}, already exists.")
+           print(f"[preprocess_all_sequences] Skipping {seq_dir}, already exists.")
            npz_paths.append(out_path)
            continue
 
 
-       p = preprocess_sequence(scenes_json, cfg, out_dir)
-       npz_paths.append(p)
+       try:
+           p = preprocess_sequence(scenes_json, cfg, out_dir)
+           npz_paths.append(p)
+       except Exception as e:
+           print(f"[ERROR] Preprocessing failed for sequence {seq_dir}: {e}")
+           print("Continuing with next sequence...")
 
-
+   print(f"[preprocess_all_sequences] Total time for all sequences: {time.time() - start_time_all_sequences:.4f} seconds")
    return npz_paths
 
 if __name__ == "__main__":
-    RADARSCENES_ROOT = "./RadarScenes"
+    RADARSCENES_ROOT = "."
 
     WORK_DIR = "./experiments"
     os.makedirs(WORK_DIR, exist_ok=True)
@@ -322,6 +353,9 @@ if __name__ == "__main__":
         num_classes=12,
         # plus any other flags (use_counts, use_log_counts, etc.) your BEVConfig has
     )
+
+    # Explicitly set max_scenes_per_sequence_for_preprocessing to None for full run
+    setattr(bev_cfg, 'max_scenes_per_sequence_for_preprocessing', None)
 
     out_dir = os.path.join(WORK_DIR, "preprocessed")
     npz_paths = preprocess_all_sequences(
